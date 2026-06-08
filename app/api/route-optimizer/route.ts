@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     const fullContainers: Container[] = data || [];
 
     if (fullContainers.length === 0) {
-      return NextResponse.json({ ordered_containers: [], total_distance_km: 0 });
+      return NextResponse.json({ ordered_containers: [], total_distance_km: 0, geometry: null, osrm_fallback: false });
     }
 
     // Algoritmo del Vecino Más Cercano
@@ -73,14 +73,52 @@ export async function POST(request: Request) {
       unvisited.splice(nearestIndex, 1);
     }
 
+    let geometry = null;
+    let osrm_fallback = false;
+    let final_distance = total_distance_km;
+
+    try {
+      const coords = [
+        `${start.lng},${start.lat}`,
+        ...ordered_containers.map(c => `${c.lng},${c.lat}`)
+      ].join(';');
+
+      const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+      const osrmRes = await fetch(osrmUrl, { signal: AbortSignal.timeout(5000) });
+      
+      if (osrmRes.ok) {
+        const osrmData = await osrmRes.json();
+        if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
+          const route = osrmData.routes[0];
+          final_distance = route.distance / 1000;
+          geometry = route.geometry; // GeoJSON LineString
+          osrm_fallback = false;
+        } else {
+          throw new Error('No routes returned by OSRM');
+        }
+      } else {
+        throw new Error(`OSRM responded with status ${osrmRes.status}`);
+      }
+    } catch (osrmError) {
+      console.error('OSRM fallback triggered:', osrmError);
+      geometry = null;
+      osrm_fallback = true;
+      final_distance = total_distance_km;
+    }
+
     // Insert route record into database
     await supabase.from('routes').insert([{
       container_ids: ordered_containers.map(c => c.id),
-      total_distance: total_distance_km
+      total_distance: final_distance
     }]);
 
-    return NextResponse.json({ ordered_containers, total_distance_km });
-  } catch (err) {
+    return NextResponse.json({ 
+      ordered_containers, 
+      total_distance_km: final_distance,
+      geometry,
+      osrm_fallback
+    });
+  } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }

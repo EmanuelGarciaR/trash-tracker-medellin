@@ -29,7 +29,7 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
         setLng(position.coords.longitude);
         setError('');
       },
-      (err) => {
+      () => {
         setError('Error al obtener tu ubicación. Asegúrate de dar permisos.');
       }
     );
@@ -56,8 +56,9 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
       setName('');
       setLat('');
       setLng('');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      if (err instanceof Error) setError(err.message);
+      else setError(String(err));
     } finally {
       setLoading(false);
     }
@@ -73,7 +74,7 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
           </button>
         </div>
 
-        <p className="text-sm text-gray-600 mb-4 bg-blue-50 p-3 rounded border border-blue-100">
+        <p className="text-sm text-waste-deepPurple mb-4 bg-waste-light p-3 rounded border border-waste-purple">
           Puedes obtener coordenadas haciendo clic derecho en Google Maps → Copiar coordenadas.
         </p>
 
@@ -119,10 +120,10 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
             </div>
           </div>
 
-          <button
-            type="button"
+          <button 
+            type="button" 
             onClick={handleUseMyLocation}
-            className="text-sm text-blue-600 hover:text-blue-800 self-start"
+            className="text-sm text-waste-deepPurple hover:text-waste-purple self-start font-medium"
           >
             Usar mi ubicación actual
           </button>
@@ -135,10 +136,10 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
             >
               Cancelar
             </button>
-            <button
-              type="submit"
+            <button 
+              type="submit" 
               disabled={loading}
-              className="flex-1 bg-black text-white rounded p-2 hover:bg-gray-800 disabled:opacity-50"
+              className="flex-1 bg-waste-orange text-white rounded p-2 hover:bg-waste-lightOrange disabled:opacity-50 transition-colors"
             >
               {loading ? 'Guardando...' : 'Guardar'}
             </button>

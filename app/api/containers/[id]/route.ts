@@ -8,7 +8,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const body = await request.json();
     const { status, fill_level } = body;
 
-    const updates: any = { last_updated: new Date().toISOString() };
+    const updates: Record<string, string | number> = { last_updated: new Date().toISOString() };
     if (status !== undefined) updates.status = status;
     if (fill_level !== undefined) updates.fill_level = fill_level;
 
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     }
 
     return NextResponse.json(data);
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }

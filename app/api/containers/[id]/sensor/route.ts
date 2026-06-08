@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       statusUpdate = 'empty';
     }
 
-    const updates: any = {
+    const updates: Record<string, string | number> = {
       fill_level,
       last_updated: new Date().toISOString()
     };
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     return NextResponse.json(data);
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }
