@@ -1,10 +1,9 @@
-'use client';
-
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, GeoJSON, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Container } from '@/types';
+import { hoverPopupBtn, animateMarkerPop } from '@/lib/animations';
 
 interface MapProps {
   containers: Container[];
@@ -101,10 +100,18 @@ export default function Map({ containers, route, onStatusChange }: MapProps) {
             <Marker 
               position={[container.lat, container.lng]} 
               icon={createCustomIcon(container.status, container.fill_level)}
+              eventHandlers={{
+                add: (e) => {
+                  if (container.status === 'full' || container.status === 'empty') {
+                    // Small pop when added if newly marked
+                    animateMarkerPop(e.target.getElement());
+                  }
+                }
+              }}
             >
               <Popup>
                 <div className="font-semibold text-sm mb-1">{container.name}</div>
-                <div className={`text-[10px] uppercase px-2 py-1 rounded inline-block font-bold mb-2 text-white ${
+                <div className={`status-badge text-[10px] uppercase px-2 py-1 rounded inline-block font-bold mb-2 text-white ${
                   container.status === 'full' ? 'bg-[#e07506]' : 
                   container.status === 'empty' ? 'bg-[#6444c0]' : 'bg-[#eb963d]'
                 }`}>
@@ -120,13 +127,17 @@ export default function Map({ containers, route, onStatusChange }: MapProps) {
                 <div className="flex gap-2 mt-2">
                   <button 
                     onClick={() => onStatusChange(container.id, 'full', 100)}
-                    className="flex-1 bg-[#e07506] hover:bg-[#eb963d] text-white text-xs py-1 px-2 rounded"
+                    onMouseEnter={(e) => hoverPopupBtn(e.currentTarget, true, '#e07506', '#eb963d')}
+                    onMouseLeave={(e) => hoverPopupBtn(e.currentTarget, false, '#e07506', '#eb963d')}
+                    className="flex-1 bg-[#e07506] text-white text-xs py-1 px-2 rounded"
                   >
                     Marcar lleno
                   </button>
                   <button 
                     onClick={() => onStatusChange(container.id, 'empty', 0)}
-                    className="flex-1 bg-[#6444c0] hover:bg-[#8e7cc3] text-white text-xs py-1 px-2 rounded"
+                    onMouseEnter={(e) => hoverPopupBtn(e.currentTarget, true, '#6444c0', '#8e7cc3')}
+                    onMouseLeave={(e) => hoverPopupBtn(e.currentTarget, false, '#6444c0', '#8e7cc3')}
+                    className="flex-1 bg-[#6444c0] text-white text-xs py-1 px-2 rounded"
                   >
                     Marcar vacío
                   </button>

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { animateModalEnter, animateModalExit, hoverPrimaryBtn, pressPrimaryBtn } from '@/lib/animations';
 
 interface AddContainerModalProps {
   isOpen: boolean;
@@ -14,8 +15,30 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
   const [lng, setLng] = useState<number | ''>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isRendered, setIsRendered] = useState(isOpen);
+  
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      setIsRendered(true);
+    } else if (isRendered) {
+      if (overlayRef.current && modalRef.current) {
+        animateModalExit(overlayRef.current, modalRef.current).then(() => {
+          setIsRendered(false);
+        });
+      } else {
+        setIsRendered(false);
+      }
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && isRendered && overlayRef.current && modalRef.current) {
+      animateModalEnter(overlayRef.current, modalRef.current);
+    }
+  }, [isOpen, isRendered]);
 
   const handleUseMyLocation = () => {
     if (!navigator.geolocation) {
@@ -64,9 +87,11 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
     }
   };
 
+  if (!isRendered) return null;
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+    <div ref={overlayRef} className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div ref={modalRef} className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold">Añadir Contenedor</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-black">
@@ -139,7 +164,11 @@ export default function AddContainerModal({ isOpen, onClose, onContainerAdded }:
             <button 
               type="submit" 
               disabled={loading}
-              className="flex-1 bg-waste-orange text-white rounded p-2 hover:bg-waste-lightOrange disabled:opacity-50 transition-colors"
+              onMouseEnter={(e) => hoverPrimaryBtn(e.currentTarget, true)}
+              onMouseLeave={(e) => hoverPrimaryBtn(e.currentTarget, false)}
+              onMouseDown={(e) => pressPrimaryBtn(e.currentTarget, true)}
+              onMouseUp={(e) => pressPrimaryBtn(e.currentTarget, false)}
+              className="flex-1 bg-waste-orange text-white rounded p-2 disabled:opacity-50"
             >
               {loading ? 'Guardando...' : 'Guardar'}
             </button>

@@ -1,15 +1,23 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
 import AddContainerModal from '@/components/AddContainerModal';
 import { Container } from '@/types';
+import { gsap } from 'gsap';
+import { 
+  animateHeader, animateMetricCards, animateContainerList, animateMap, 
+  animateRouteResults, hoverMetricCard, hoverListItem, hoverPrimaryBtn, 
+  pressPrimaryBtn, animateSpinner, stopSpinner, animateItemFlash
+} from '@/lib/animations';
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false });
 
 export default function Dashboard() {
   const [containers, setContainers] = useState<Container[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [collectionsToday, setCollectionsToday] = useState(0);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success'|'error'} | null>(null);
 
@@ -21,6 +29,36 @@ export default function Dashboard() {
   // Sensor state
   const [activeSensorSim, setActiveSensorSim] = useState<string | null>(null);
   const [sensorDist, setSensorDist] = useState<number | ''>('');
+
+  // Refs for animations
+  const headerRef = useRef<HTMLElement>(null);
+  const metricsRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const mapWrapperRef = useRef<HTMLElement>(null);
+  const routeResultsRef = useRef<HTMLDivElement>(null);
+  
+  const spinnerRef = useRef<HTMLSpanElement>(null);
+  const btnTextRef = useRef<HTMLSpanElement>(null);
+  const spinnerTweenRef = useRef<gsap.core.Tween | null>(null);
+
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      animateHeader(headerRef);
+      animateMetricCards(metricsRef);
+      animateContainerList(listRef);
+      animateMap(mapWrapperRef);
+    });
+    return () => ctx.revert();
+  }, []);
+
+  useEffect(() => {
+    if (route) {
+      const ctx = gsap.context(() => {
+        animateRouteResults(routeResultsRef);
+      });
+      return () => ctx.revert();
+    }
+  }, [route]);
 
   const showToast = (message: string, type: 'success'|'error' = 'success') => {
     setToast({message, type});
@@ -35,17 +73,32 @@ export default function Dashboard() {
         setContainers(data);
         setLastUpdated(new Date());
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
       // Evitar spam de toast de error en polling
+    }
+  }, []);
+
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const res = await fetch('/api/metrics');
+      if (res.ok) {
+        const data = await res.json();
+        setCollectionsToday(data.collectionsToday);
+      }
+    } catch {
+      // Ignore
     }
   }, []);
 
   useEffect(() => {
     fetchContainers();
-    const interval = setInterval(fetchContainers, 30000);
+    fetchMetrics();
+    const interval = setInterval(() => {
+      fetchContainers();
+      fetchMetrics();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [fetchContainers]);
+  }, [fetchContainers, fetchMetrics]);
 
   const handleUpdateStatus = async (id: string, status: 'full' | 'empty', fill_level: number) => {
     try {
@@ -56,6 +109,11 @@ export default function Dashboard() {
       });
       if (res.ok) {
         showToast('Estado actualizado');
+        
+        // Find DOM element to flash
+        const itemEl = document.getElementById(`container-item-${id}`);
+        if (itemEl) animateItemFlash(itemEl, '#e6e2ef');
+
         fetchContainers();
       } else throw new Error();
     } catch {
@@ -82,17 +140,42 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteContainer = async (id: string) => {
+    if (!window.confirm('¿Seguro que deseas eliminar este contenedor?')) return;
+    try {
+      const res = await fetch(`/api/containers/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Contenedor eliminado');
+        fetchContainers();
+      } else throw new Error();
+    } catch {
+      showToast('Error al eliminar', 'error');
+    }
+  };
+
   const calculateRoute = async () => {
     if (startLat === '' || startLng === '') {
       showToast('Ingresa punto de partida', 'error');
       return;
     }
+    
+    if (spinnerRef.current && btnTextRef.current) {
+       gsap.set(spinnerRef.current, { opacity: 1, scale: 1 });
+       spinnerTweenRef.current = animateSpinner(spinnerRef.current);
+       gsap.to(btnTextRef.current, { opacity: 0, scale: 0.5, duration: 0.2 });
+    }
+
     try {
       const res = await fetch('/api/route-optimizer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ start: { lat: Number(startLat), lng: Number(startLng) } })
       });
+      
+      if (spinnerRef.current && btnTextRef.current && spinnerTweenRef.current) {
+         stopSpinner(spinnerRef.current, btnTextRef.current, spinnerTweenRef.current);
+      }
+
       if (res.ok) {
         const data = await res.json();
         setRoute({
@@ -106,8 +189,12 @@ export default function Dashboard() {
         } else {
           showToast('Ruta calculada por OSRM');
         }
+        fetchMetrics();
       } else throw new Error();
     } catch {
+      if (spinnerRef.current && btnTextRef.current && spinnerTweenRef.current) {
+         stopSpinner(spinnerRef.current, btnTextRef.current, spinnerTweenRef.current);
+      }
       showToast('Error calculando ruta', 'error');
     }
   };
@@ -133,9 +220,9 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen bg-waste-light font-sans text-gray-800">
       {/* HEADER */}
-      <header className="bg-waste-deepPurple text-white p-4 flex justify-between items-center shadow-md z-10">
+      <header ref={headerRef} className="bg-waste-deepPurple text-white p-4 flex justify-between items-center shadow-md z-10">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold tracking-wider text-waste-orange">TrashTracker <span className="text-gray-300 font-normal">· Medellín</span></h1>
+          <Image src="/trashTrackerHeader.png" alt="TrashTracker Medellín" width={220} height={50} priority className="h-10 w-auto" />
         </div>
         <div className="flex items-center gap-6 hidden sm:flex">
           <span className="text-sm text-waste-light">
@@ -143,7 +230,11 @@ export default function Dashboard() {
           </span>
           <button 
             onClick={() => setIsAddModalOpen(true)}
-            className="bg-waste-orange hover:bg-waste-lightOrange text-white px-4 py-2 rounded shadow-sm text-sm font-medium transition-colors"
+            onMouseEnter={(e) => hoverPrimaryBtn(e.currentTarget, true)}
+            onMouseLeave={(e) => hoverPrimaryBtn(e.currentTarget, false)}
+            onMouseDown={(e) => pressPrimaryBtn(e.currentTarget, true)}
+            onMouseUp={(e) => pressPrimaryBtn(e.currentTarget, false)}
+            className="bg-waste-orange text-white px-4 py-2 rounded shadow-sm text-sm font-medium"
           >
             + Agregar contenedor
           </button>
@@ -160,7 +251,7 @@ export default function Dashboard() {
       <main className="flex flex-1 overflow-hidden flex-col md:flex-row">
         
         {/* MAP COLUMN */}
-        <section className="w-full md:w-[65%] h-[50vh] md:h-full relative z-0">
+        <section ref={mapWrapperRef} className="w-full md:w-[65%] h-[50vh] md:h-full relative z-0">
           <Map 
             containers={containers} 
             route={route}
@@ -173,22 +264,38 @@ export default function Dashboard() {
           <div className="p-4 flex flex-col gap-6">
             
             {/* METRICS */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-white p-3 rounded shadow-sm border border-gray-200">
+            <div ref={metricsRef} className="grid grid-cols-2 gap-3">
+              <div 
+                className="bg-white p-3 rounded shadow-sm border border-gray-200"
+                onMouseEnter={(e) => hoverMetricCard(e.currentTarget, true)}
+                onMouseLeave={(e) => hoverMetricCard(e.currentTarget, false)}
+              >
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total contenedores</p>
                 <p className="text-2xl font-bold text-waste-deepPurple">{totalCount}</p>
               </div>
-              <div className={`bg-white p-3 rounded shadow-sm border ${fullCount > 0 ? 'border-waste-orange bg-orange-50' : 'border-gray-200'}`}>
+              <div 
+                className={`bg-white p-3 rounded shadow-sm border ${fullCount > 0 ? 'border-waste-orange bg-orange-50' : 'border-gray-200'}`}
+                onMouseEnter={(e) => hoverMetricCard(e.currentTarget, true)}
+                onMouseLeave={(e) => hoverMetricCard(e.currentTarget, false)}
+              >
                 <p className={`text-xs uppercase tracking-wide ${fullCount > 0 ? 'text-waste-orange' : 'text-gray-500'}`}>Llenos</p>
                 <p className={`text-2xl font-bold ${fullCount > 0 ? 'text-waste-orange' : 'text-waste-deepPurple'}`}>{fullCount}</p>
               </div>
-              <div className="bg-white p-3 rounded shadow-sm border border-gray-200">
+              <div 
+                className="bg-white p-3 rounded shadow-sm border border-gray-200"
+                onMouseEnter={(e) => hoverMetricCard(e.currentTarget, true)}
+                onMouseLeave={(e) => hoverMetricCard(e.currentTarget, false)}
+              >
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Vacíos</p>
                 <p className="text-2xl font-bold text-waste-deepPurple">{emptyCount}</p>
               </div>
-              <div className="bg-white p-3 rounded shadow-sm border border-gray-200">
+              <div 
+                className="bg-white p-3 rounded shadow-sm border border-gray-200"
+                onMouseEnter={(e) => hoverMetricCard(e.currentTarget, true)}
+                onMouseLeave={(e) => hoverMetricCard(e.currentTarget, false)}
+              >
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Recolecciones hoy</p>
-                <p className="text-2xl font-bold text-waste-deepPurple">0</p>
+                <p className="text-2xl font-bold text-waste-deepPurple">{collectionsToday}</p>
               </div>
             </div>
 
@@ -221,9 +328,14 @@ export default function Dashboard() {
               <div className="flex gap-2">
                 <button 
                   onClick={calculateRoute}
-                  className="flex-1 bg-waste-deepPurple hover:bg-waste-purple text-white py-2 rounded text-sm font-medium transition-colors"
+                  onMouseEnter={(e) => hoverPrimaryBtn(e.currentTarget, true)}
+                  onMouseLeave={(e) => hoverPrimaryBtn(e.currentTarget, false)}
+                  onMouseDown={(e) => pressPrimaryBtn(e.currentTarget, true)}
+                  onMouseUp={(e) => pressPrimaryBtn(e.currentTarget, false)}
+                  className="flex-1 bg-waste-deepPurple text-white py-2 rounded text-sm font-medium relative overflow-hidden"
                 >
-                  Calcular ruta
+                  <span ref={spinnerRef} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 text-lg">⚙</span>
+                  <span ref={btnTextRef} className="inline-block">Calcular ruta</span>
                 </button>
                 {route && (
                   <button 
@@ -236,7 +348,7 @@ export default function Dashboard() {
               </div>
               
               {route && (
-                <div className="mt-4 p-3 bg-waste-light border border-waste-purple rounded text-sm">
+                <div ref={routeResultsRef} className="mt-4 p-3 bg-waste-light border border-waste-purple rounded text-sm">
                   <p className="font-semibold text-waste-deepPurple mb-2">Distancia total: {route.total_distance_km.toFixed(2)} km</p>
                   <ol className="list-decimal pl-4 text-gray-700 space-y-1 text-xs">
                     {route.ordered_containers.map(c => (
@@ -253,17 +365,32 @@ export default function Dashboard() {
               <h2 className="text-sm font-bold text-waste-deepPurple uppercase tracking-wide">
                 Lista de Contenedores ({containers.length})
               </h2>
-              <div className="flex flex-col gap-2">
+              <div ref={listRef} className="flex flex-col gap-2">
                 {containers.map(container => (
-                  <div key={container.id} className="bg-white p-3 rounded shadow-sm border border-gray-200 flex flex-col gap-2">
+                  <div 
+                    key={container.id} 
+                    id={`container-item-${container.id}`}
+                    className="bg-white p-3 rounded shadow-sm border border-gray-200 flex flex-col gap-2"
+                    onMouseEnter={(e) => hoverListItem(e.currentTarget, true)}
+                    onMouseLeave={(e) => hoverListItem(e.currentTarget, false)}
+                  >
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-sm">{container.name}</span>
-                      <span className={`text-[10px] uppercase px-2 py-1 rounded font-bold ${
-                        container.status === 'full' ? 'bg-[#e07506] text-white' : 
-                        container.status === 'empty' ? 'bg-[#6444c0] text-white' : 'bg-[#eb963d] text-white'
-                      }`}>
-                        {container.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`status-badge text-[10px] uppercase px-2 py-1 rounded font-bold ${
+                          container.status === 'full' ? 'bg-[#e07506] text-white' : 
+                          container.status === 'empty' ? 'bg-[#6444c0] text-white' : 'bg-[#eb963d] text-white'
+                        }`}>
+                          {container.status}
+                        </span>
+                        <button 
+                          onClick={() => handleDeleteContainer(container.id)}
+                          className="text-red-500 hover:text-red-700 font-bold px-1 text-xs"
+                          title="Eliminar contenedor"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
                       <div 
