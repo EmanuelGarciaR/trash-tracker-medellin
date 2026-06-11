@@ -14,9 +14,11 @@ import {
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false });
 
+const CONTAINER_DEPTH_CM = 50; // Profundidad del contenedor en cm (igual que en el ESP32)
+
 export default function Dashboard() {
   const [containers, setContainers] = useState<Container[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [collectionsToday, setCollectionsToday] = useState(0);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success'|'error'} | null>(null);
@@ -26,9 +28,12 @@ export default function Dashboard() {
   const [startLng, setStartLng] = useState<number | ''>('');
   const [route, setRoute] = useState<{ ordered_containers: Container[]; geometry: GeoJSON.LineString | null; osrm_fallback: boolean; total_distance_km: number } | null>(null);
 
-  // Sensor state
+  // Sensor simulation state
   const [activeSensorSim, setActiveSensorSim] = useState<string | null>(null);
   const [sensorDist, setSensorDist] = useState<number | ''>('');
+
+  // ESP32-marked containers (persisted in localStorage)
+  const [esp32Ids, setEsp32Ids] = useState<Set<string>>(new Set());
 
   // Refs for animations
   const headerRef = useRef<HTMLElement>(null);
@@ -40,6 +45,27 @@ export default function Dashboard() {
   const spinnerRef = useRef<HTMLSpanElement>(null);
   const btnTextRef = useRef<HTMLSpanElement>(null);
   const spinnerTweenRef = useRef<gsap.core.Tween | null>(null);
+
+  // Load ESP32 IDs from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('esp32_container_ids');
+      if (saved) setEsp32Ids(new Set(JSON.parse(saved)));
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleEsp32 = (id: string) => {
+    setEsp32Ids(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      localStorage.setItem('esp32_container_ids', JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   useEffect(() => {
     const ctx = gsap.context(() => {
@@ -130,7 +156,8 @@ export default function Dashboard() {
         body: JSON.stringify({ distance_cm: Number(sensorDist) })
       });
       if (res.ok) {
-        showToast('Lectura simulada');
+        const data = await res.json();
+        showToast(`Sensor: ${data.fill_level}% → ${data.status}`);
         setActiveSensorSim(null);
         setSensorDist('');
         fetchContainers();
@@ -213,9 +240,15 @@ export default function Dashboard() {
     );
   };
 
+  // Calculate preview fill percentage for sensor simulation
+  const previewFillPct = sensorDist !== '' 
+    ? Math.max(0, Math.min(100, Math.round(((CONTAINER_DEPTH_CM - Number(sensorDist)) / CONTAINER_DEPTH_CM) * 100)))
+    : null;
+
   const totalCount = containers.length;
   const fullCount = containers.filter(c => c.status === 'full').length;
   const emptyCount = containers.filter(c => c.status === 'empty').length;
+  const esp32Count = containers.filter(c => esp32Ids.has(c.id)).length;
 
   return (
     <div className="flex flex-col h-screen bg-waste-light font-sans text-gray-800">
@@ -225,8 +258,8 @@ export default function Dashboard() {
           <Image src="/trashTrackerHeader.png" alt="TrashTracker Medellín" width={220} height={50} priority className="h-10 w-auto" />
         </div>
         <div className="flex items-center gap-6 hidden sm:flex">
-          <span className="text-sm text-waste-light">
-            Última actualización: {lastUpdated.toLocaleTimeString()}
+          <span className="text-sm text-waste-light" suppressHydrationWarning>
+            Última actualización: {lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}
           </span>
           <button 
             onClick={() => setIsAddModalOpen(true)}
@@ -294,8 +327,8 @@ export default function Dashboard() {
                 onMouseEnter={(e) => hoverMetricCard(e.currentTarget, true)}
                 onMouseLeave={(e) => hoverMetricCard(e.currentTarget, false)}
               >
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Recolecciones hoy</p>
-                <p className="text-2xl font-bold text-waste-deepPurple">{collectionsToday}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Sensores ESP32</p>
+                <p className="text-2xl font-bold text-teal-600">{esp32Count}</p>
               </div>
             </div>
 
@@ -366,61 +399,111 @@ export default function Dashboard() {
                 Lista de Contenedores ({containers.length})
               </h2>
               <div ref={listRef} className="flex flex-col gap-2">
-                {containers.map(container => (
-                  <div 
-                    key={container.id} 
-                    id={`container-item-${container.id}`}
-                    className="bg-white p-3 rounded shadow-sm border border-gray-200 flex flex-col gap-2"
-                    onMouseEnter={(e) => hoverListItem(e.currentTarget, true)}
-                    onMouseLeave={(e) => hoverListItem(e.currentTarget, false)}
-                  >
-                    <div className="flex justify-between items-center">
-                      <span className="font-semibold text-sm">{container.name}</span>
+                {containers.map(container => {
+                  const isEsp32 = esp32Ids.has(container.id);
+                  return (
+                    <div 
+                      key={container.id} 
+                      id={`container-item-${container.id}`}
+                      className={`bg-white p-3 rounded shadow-sm border flex flex-col gap-2 ${isEsp32 ? 'border-teal-400 ring-1 ring-teal-200' : 'border-gray-200'}`}
+                      onMouseEnter={(e) => hoverListItem(e.currentTarget, true)}
+                      onMouseLeave={(e) => hoverListItem(e.currentTarget, false)}
+                    >
+                      {/* Row 1: Name + badges */}
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">{container.name}</span>
+                          {isEsp32 && (
+                            <span className="text-[9px] uppercase px-1.5 py-0.5 rounded font-bold bg-teal-100 text-teal-700 border border-teal-300">
+                              ESP32
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {(container.fill_level === 0 || container.fill_level >= 100) && (
+                            <span className={`status-badge text-[10px] uppercase px-2 py-1 rounded font-bold ${
+                              container.status === 'full' ? 'bg-[#e07506] text-white' : 
+                              container.status === 'empty' ? 'bg-[#6444c0] text-white' : 'bg-[#eb963d] text-white'
+                            }`}>
+                              {container.status}
+                            </span>
+                          )}
+                          <button 
+                            onClick={() => handleDeleteContainer(container.id)}
+                            className="text-red-500 hover:text-red-700 font-bold px-1 text-xs"
+                            title="Eliminar contenedor"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Row 2: Fill level bar + percentage */}
                       <div className="flex items-center gap-2">
-                        <span className={`status-badge text-[10px] uppercase px-2 py-1 rounded font-bold ${
-                          container.status === 'full' ? 'bg-[#e07506] text-white' : 
-                          container.status === 'empty' ? 'bg-[#6444c0] text-white' : 'bg-[#eb963d] text-white'
+                        <div className="flex-1 bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full transition-all duration-500 ${container.status === 'full' ? 'bg-waste-orange' : 'bg-waste-deepPurple'}`} 
+                            style={{ width: `${container.fill_level}%` }}
+                          ></div>
+                        </div>
+                        <span className={`text-xs font-bold min-w-[36px] text-right ${
+                          container.fill_level >= 80 ? 'text-[#e07506]' : 
+                          container.fill_level >= 50 ? 'text-[#eb963d]' : 'text-[#6444c0]'
                         }`}>
-                          {container.status}
+                          {container.fill_level}%
                         </span>
+                      </div>
+
+                      {/* Row 3: Actions */}
+                      <div className="flex items-center gap-2 mt-1">
                         <button 
-                          onClick={() => handleDeleteContainer(container.id)}
-                          className="text-red-500 hover:text-red-700 font-bold px-1 text-xs"
-                          title="Eliminar contenedor"
+                          onClick={() => toggleEsp32(container.id)}
+                          className={`text-[10px] px-2 py-0.5 rounded border font-medium transition-colors ${
+                            isEsp32 
+                              ? 'bg-teal-50 text-teal-700 border-teal-300 hover:bg-teal-100' 
+                              : 'bg-gray-50 text-gray-500 border-gray-300 hover:bg-gray-100'
+                          }`}
+                          title={isEsp32 ? 'Quitar marca ESP32' : 'Marcar como ESP32'}
                         >
-                          ✕
+                          {isEsp32 ? '📡 ESP32 ✓' : '📡 Marcar ESP32'}
                         </button>
+                        <span className="text-gray-300">|</span>
+                        {activeSensorSim === container.id ? (
+                          <div className="flex gap-1.5 items-center flex-1">
+                            <input 
+                              type="number" 
+                              placeholder="0-50 cm" 
+                              value={sensorDist}
+                              onChange={e => setSensorDist(e.target.value === '' ? '' : Number(e.target.value))}
+                              className="w-16 text-xs border p-1 rounded"
+                              min="0"
+                              max={CONTAINER_DEPTH_CM}
+                              step="1"
+                            />
+                            <span className="text-[9px] text-gray-400">cm</span>
+                            {previewFillPct !== null && (
+                              <span className={`text-[10px] font-bold ${
+                                previewFillPct >= 80 ? 'text-[#e07506]' : 
+                                previewFillPct >= 50 ? 'text-[#eb963d]' : 'text-[#6444c0]'
+                              }`}>
+                                → {previewFillPct}%
+                              </span>
+                            )}
+                            <button onClick={() => handleSimulateSensor(container.id)} className="bg-waste-deepPurple hover:bg-waste-purple text-white text-xs px-2 py-1 rounded">Enviar</button>
+                            <button onClick={() => { setActiveSensorSim(null); setSensorDist(''); }} className="text-gray-500 text-xs hover:text-gray-800">✕</button>
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={() => { setActiveSensorSim(container.id); setSensorDist(''); }}
+                            className="text-[11px] text-gray-500 hover:text-gray-800 underline"
+                          >
+                            Simular sensor
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-                      <div 
-                        className={`h-1.5 rounded-full ${container.status === 'full' ? 'bg-waste-orange' : 'bg-waste-deepPurple'}`} 
-                        style={{ width: `${container.fill_level}%` }}
-                      ></div>
-                    </div>
-                    
-                    {activeSensorSim === container.id ? (
-                      <div className="flex gap-2 mt-2 items-center">
-                        <input 
-                          type="number" 
-                          placeholder="Dist. (cm)" 
-                          value={sensorDist}
-                          onChange={e => setSensorDist(e.target.value === '' ? '' : Number(e.target.value))}
-                          className="w-20 text-xs border p-1 rounded"
-                        />
-                        <button onClick={() => handleSimulateSensor(container.id)} className="bg-waste-deepPurple hover:bg-waste-purple text-white text-xs px-2 py-1 rounded">Ok</button>
-                        <button onClick={() => setActiveSensorSim(null)} className="text-gray-500 text-xs">Cancelar</button>
-                      </div>
-                    ) : (
-                      <button 
-                        onClick={() => setActiveSensorSim(container.id)}
-                        className="text-[11px] text-gray-500 hover:text-gray-800 text-left mt-1 underline"
-                      >
-                        Simular lectura sensor
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
                 {containers.length === 0 && <p className="text-sm text-gray-500 mt-2">No hay contenedores registrados.</p>}
               </div>
             </div>
@@ -447,3 +530,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

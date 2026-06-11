@@ -77,33 +77,47 @@ export async function POST(request: Request) {
     let osrm_fallback = false;
     let final_distance = total_distance_km;
 
-    try {
-      const coords = [
-        `${start.lng},${start.lat}`,
-        ...ordered_containers.map(c => `${c.lng},${c.lat}`)
-      ].join(';');
+    // Intentar obtener ruta real de OSRM con reintentos
+    const coords = [
+      `${start.lng},${start.lat}`,
+      ...ordered_containers.map(c => `${c.lng},${c.lat}`)
+    ].join(';');
 
-      const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
-      const osrmRes = await fetch(osrmUrl, { signal: AbortSignal.timeout(5000) });
-      
-      if (osrmRes.ok) {
-        const osrmData = await osrmRes.json();
-        if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
-          const route = osrmData.routes[0];
-          final_distance = route.distance / 1000;
-          geometry = route.geometry; // GeoJSON LineString
-          osrm_fallback = false;
+    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const timeout = 5000 * attempt; // 5s, 10s, 15s
+        console.log(`OSRM attempt ${attempt}/${MAX_RETRIES} (timeout: ${timeout}ms)`);
+        const osrmRes = await fetch(osrmUrl, { signal: AbortSignal.timeout(timeout) });
+
+        if (osrmRes.ok) {
+          const osrmData = await osrmRes.json();
+          if (osrmData.code === 'Ok' && osrmData.routes && osrmData.routes.length > 0) {
+            const route = osrmData.routes[0];
+            final_distance = route.distance / 1000;
+            geometry = route.geometry; // GeoJSON LineString
+            osrm_fallback = false;
+            break; // éxito, salir del loop
+          } else {
+            throw new Error('No routes returned by OSRM');
+          }
         } else {
-          throw new Error('No routes returned by OSRM');
+          throw new Error(`OSRM responded with status ${osrmRes.status}`);
         }
-      } else {
-        throw new Error(`OSRM responded with status ${osrmRes.status}`);
+      } catch (osrmError) {
+        console.error(`OSRM attempt ${attempt} failed:`, osrmError);
+        if (attempt === MAX_RETRIES) {
+          console.error('OSRM all retries exhausted, using fallback');
+          geometry = null;
+          osrm_fallback = true;
+          final_distance = total_distance_km;
+        } else {
+          // Esperar antes de reintentar (backoff: 1s, 2s)
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
       }
-    } catch (osrmError) {
-      console.error('OSRM fallback triggered:', osrmError);
-      geometry = null;
-      osrm_fallback = true;
-      final_distance = total_distance_km;
     }
 
     // Insert route record into database

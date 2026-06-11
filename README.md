@@ -74,6 +74,8 @@ trash-tracker/
 │   └── animations.ts                   # Funciones GSAP centralizadas
 ├── types/
 │   └── index.ts                        # Tipos TypeScript globales
+├── esp32/
+│   └── main.py                          # Firmware MicroPython para ESP32 + HC-SR04
 └── scripts/
     ├── generate_map.py                  # Mapa Folium estático
     └── simulate_sensor.py              # Simulación del sensor por CLI

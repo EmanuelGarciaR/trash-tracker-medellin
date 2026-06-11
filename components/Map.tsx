@@ -111,12 +111,14 @@ export default function Map({ containers, route, onStatusChange }: MapProps) {
             >
               <Popup>
                 <div className="font-semibold text-sm mb-1">{container.name}</div>
-                <div className={`status-badge text-[10px] uppercase px-2 py-1 rounded inline-block font-bold mb-2 text-white ${
-                  container.status === 'full' ? 'bg-[#e07506]' : 
-                  container.status === 'empty' ? 'bg-[#6444c0]' : 'bg-[#eb963d]'
-                }`}>
-                  {container.status}
-                </div>
+                {(container.fill_level === 0 || container.fill_level >= 100) && (
+                  <div className={`status-badge text-[10px] uppercase px-2 py-1 rounded inline-block font-bold mb-2 text-white ${
+                    container.status === 'full' ? 'bg-[#e07506]' : 
+                    container.status === 'empty' ? 'bg-[#6444c0]' : 'bg-[#eb963d]'
+                  }`}>
+                    {container.status}
+                  </div>
+                )}
                 <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1">
                   <div 
                     className="h-2.5 rounded-full" 

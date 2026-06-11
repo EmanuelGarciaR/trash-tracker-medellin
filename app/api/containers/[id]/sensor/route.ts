@@ -18,20 +18,13 @@ export async function POST(request: Request, { params }: { params: { id: string 
     // Clamp between 0 and 100
     fill_level = Math.max(0, Math.min(100, fill_level));
 
-    let statusUpdate = undefined;
-    if (fill_level >= 80) {
-      statusUpdate = 'full';
-    } else if (fill_level < 20) {
-      statusUpdate = 'empty';
-    }
+    const statusUpdate = fill_level >= 100 ? 'full' : 'empty';
 
     const updates: Record<string, string | number> = {
       fill_level,
+      status: statusUpdate,
       last_updated: new Date().toISOString()
     };
-    if (statusUpdate) {
-      updates.status = statusUpdate;
-    }
 
     const { data, error } = await supabase
       .from('containers')
